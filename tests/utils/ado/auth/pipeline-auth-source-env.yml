@@ -1,0 +1,28 @@
+# Explicit auth_source=env. Verifies the env branch of
+# AzureRMAuth._get_credentials runs distinct from `auto` (which would
+# also succeed with the same env vars).
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - auth_source=env'
+    authSourceLabel: 'auth_source=env'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    extraEnv:
+      AUTH_SMOKE_AUTH_SOURCE: 'env'
+      AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
+      AZURE_SECRET: $(AZURE_SECRET)
+      AZURE_TENANT: $(AZURE_TENANT)
+      AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)

@@ -1,0 +1,37 @@
+# Precedence test for `auto`: module params must beat env vars.
+# Set BOGUS AZURE_* env vars and GOOD AUTH_SMOKE_* module params; expect the
+# run to succeed. A regression where env wins over params would surface as
+# auth failure (the bogus subscription id wouldn't exist).
+#
+# AUTH_SMOKE_* values are surfaced into module_defaults by
+# auth_smoke/tasks/main.yml, so no runme wrapper is needed.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - precedence (params > env)'
+    authSourceLabel: 'precedence params>env (auto)'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    extraEnv:
+      # Bogus AZURE_* env vars - must NOT be picked up because module params win.
+      AZURE_CLIENT_ID: '00000000-0000-0000-0000-000000000000'
+      AZURE_SECRET: 'invalid'
+      AZURE_TENANT: '00000000-0000-0000-0000-000000000000'
+      AZURE_SUBSCRIPTION_ID: '00000000-0000-0000-0000-000000000000'
+      # Real creds - delivered to module_defaults via AUTH_SMOKE_* lookup in tasks/main.yml.
+      AUTH_SMOKE_CLIENT_ID: $(AZURE_CLIENT_ID)
+      AUTH_SMOKE_SECRET: $(AZURE_SECRET)
+      AUTH_SMOKE_TENANT: $(AZURE_TENANT)
+      AUTH_SMOKE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)

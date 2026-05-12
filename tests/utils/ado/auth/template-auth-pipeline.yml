@@ -1,0 +1,114 @@
+# Shared ADO template for AzureRMAuth per-method smoke pipelines.
+#
+# Each per-method pipeline (tests/utils/ado/auth/pipeline-*.yml) extends this
+# template and supplies `preAuthSteps` which are responsible for configuring
+# exactly ONE authentication path (env vars, credential file on disk,
+# managed identity already attached to the runner, az login, OIDC token /
+# token file, etc.) before `ansible-test integration auth_smoke` runs.
+#
+# The template re-enables the `auth_smoke` target (which is `disabled` by
+# default in its aliases file so the standard PR matrix never runs it),
+# runs only that target, and finally cleans up any leaked resource groups
+# matching the smoke prefix.
+
+parameters:
+  - name: pipelineDisplayName
+    type: string
+  - name: authSourceLabel
+    displayName: 'Auth path being exercised (display only)'
+    type: string
+  - name: pythonVer
+    type: string
+    default: "3.13"
+  - name: ansibleVer
+    type: string
+    default: "2.18"
+  - name: pool
+    type: object
+    default:
+      name: pool-ubuntu-2404
+  - name: preAuthSteps
+    type: stepList
+    default: []
+  - name: extraEnv
+    type: object
+    default: {}
+
+jobs:
+  - job: AuthSmoke
+    displayName: ${{ parameters.pipelineDisplayName }}
+    timeoutInMinutes: 60
+    pool: ${{ parameters.pool }}
+    variables:
+      AUTH_SMOKE_RG_PREFIX: "ansible-auth-smoke-"
+    steps:
+      - task: UsePythonVersion@0
+        displayName: 'Use Python ${{ parameters.pythonVer }}'
+        inputs:
+          versionSpec: '${{ parameters.pythonVer }}'
+
+      - bash: |
+          set -euo pipefail
+          python -m venv ~/ansible-venv
+          # shellcheck disable=SC1090
+          . ~/ansible-venv/bin/activate
+          pip install setuptools || true
+          git clone https://github.com/ansible/ansible.git ~/ansible
+          pushd ~/ansible > /dev/null
+          if [ "${{ parameters.ansibleVer }}" = "devel" ]; then
+            echo "Using ansible devel"
+          else
+            git checkout "stable-${{ parameters.ansibleVer }}"
+          fi
+          # shellcheck disable=SC1091
+          source hacking/env-setup
+          pip install paramiko PyYAML Jinja2 httplib2 six
+          popd > /dev/null
+
+          TEST_DIR="${HOME}/.ansible/ansible_collections/azure/azcollection"
+          mkdir -p "${TEST_DIR}"
+          cp -aT "$(Build.Repository.LocalPath)" "${TEST_DIR}"
+          pip install -I -r "${TEST_DIR}/requirements.txt"
+
+          # Re-enable the auth_smoke target (its aliases ship with `disabled`
+          # so it never runs in the standard PR group matrix).
+          ALIASES="${TEST_DIR}/tests/integration/targets/auth_smoke/aliases"
+          if [ -f "${ALIASES}" ]; then
+            grep -v '^disabled$' "${ALIASES}" > "${ALIASES}.tmp"
+            mv "${ALIASES}.tmp" "${ALIASES}"
+          fi
+        displayName: 'Set up Python, Ansible, and azcollection'
+
+      - ${{ each step in parameters.preAuthSteps }}:
+          - ${{ step }}
+
+      - bash: |
+          set -euo pipefail
+          # shellcheck disable=SC1090
+          . ~/ansible-venv/bin/activate
+          TEST_DIR="${HOME}/.ansible/ansible_collections/azure/azcollection"
+          cd "${TEST_DIR}"
+          mkdir -p shippable/testresults
+          # cloud-config-azure.ini is required by ansible-test for cloud/azure
+          # targets; keep it empty so the modules pick up auth purely from
+          # whatever preAuthSteps configured (env/file/MSI/CLI/OIDC/...).
+          : > tests/integration/cloud-config-azure.ini
+          ansible-test integration --color -v auth_smoke --allow-destructive
+        displayName: 'Run auth_smoke (${{ parameters.authSourceLabel }})'
+        env:
+          ${{ insert }}: ${{ parameters.extraEnv }}
+
+      - task: AzureCLI@2
+        displayName: 'Cleanup any leaked smoke resource groups'
+        condition: always()
+        inputs:
+          azureSubscription: '$(SUBSCRIPTION_FULL_NAME)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            set -eu
+            az group list --query "[?starts_with(name, '$(AUTH_SMOKE_RG_PREFIX)')].name" -o tsv | while read -r rg; do
+              [ -z "$rg" ] && continue
+              echo "Deleting leaked resource group: $rg"
+              az group delete --name "$rg" --yes --no-wait || true
+            done

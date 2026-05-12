@@ -1,0 +1,2 @@
+auth_smoke_location: australiaeast
+auth_smoke_rg_name: "ansible-auth-smoke-{{ 999999999999 | random | to_uuid }}"

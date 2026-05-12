@@ -1,0 +1,48 @@
+# Service principal + X.509 certificate authentication.
+# Exercises the certificate.CertificateCredential branch in AzureRMAuth.
+#
+# Required ADO secret variables (see README.md):
+#   AZURE_CLIENT_ID_CERT     - SP appId that has the cert uploaded
+#   AZURE_TENANT             - tenant id
+#   AZURE_SUBSCRIPTION_ID    - target subscription
+#   AZURE_CERT_PEM           - secret containing the full PEM (key + cert)
+#   AZURE_CERT_THUMBPRINT    - hex thumbprint of the cert
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - SP certificate'
+    authSourceLabel: 'sp-certificate (auto)'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    preAuthSteps:
+      - bash: |
+          set -eu
+          umask 077
+          mkdir -p "${HOME}/.azure"
+          CERT_PATH="${HOME}/.azure/sp.pem"
+          # Write PEM from a secret variable; never echo its contents.
+          set +x
+          printf '%s' "$AZURE_CERT_PEM_SECRET" > "${CERT_PATH}"
+          set -x
+          echo "##vso[task.setvariable variable=AZURE_X509_CERTIFICATE_PATH]${CERT_PATH}"
+        displayName: 'Stage SP certificate'
+        env:
+          AZURE_CERT_PEM_SECRET: $(AZURE_CERT_PEM)
+    extraEnv:
+      AZURE_CLIENT_ID: $(AZURE_CLIENT_ID_CERT)
+      AZURE_TENANT: $(AZURE_TENANT)
+      AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)
+      AZURE_X509_CERTIFICATE_PATH: $(AZURE_X509_CERTIFICATE_PATH)
+      AZURE_THUMBPRINT: $(AZURE_CERT_THUMBPRINT)

@@ -1,0 +1,49 @@
+# `auto` -> default profile in ~/.azure/credentials fallback.
+# Exercises line ~1898 of AzureRMAuth._get_credentials: arg_credentials has
+# no client_id/ad_user/profile, env has no AZURE_SUBSCRIPTION_ID, but
+# ~/.azure/credentials [default] is populated. _get_profile() with no args
+# must satisfy auth.
+#
+# NOTE: we deliberately do NOT pass AZURE_* env vars or AUTH_SMOKE_* module
+# params here. The only working auth path is the credentials file.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - auto + default credfile fallback'
+    authSourceLabel: 'auto -> ~/.azure/credentials [default]'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    preAuthSteps:
+      - bash: |
+          set -eu
+          umask 077
+          mkdir -p "${HOME}/.azure"
+          set +x
+          cat > "${HOME}/.azure/credentials" <<EOF
+          [default]
+          subscription_id=${AZURE_SUBSCRIPTION_ID_SECRET}
+          client_id=${AZURE_CLIENT_ID_SECRET}
+          secret=${AZURE_SECRET_SECRET}
+          tenant=${AZURE_TENANT_SECRET}
+          EOF
+          set -x
+          chmod 600 "${HOME}/.azure/credentials"
+        displayName: 'Write ~/.azure/credentials [default]'
+        env:
+          AZURE_CLIENT_ID_SECRET: $(AZURE_CLIENT_ID)
+          AZURE_SECRET_SECRET: $(AZURE_SECRET)
+          AZURE_TENANT_SECRET: $(AZURE_TENANT)
+          AZURE_SUBSCRIPTION_ID_SECRET: $(AZURE_SUBSCRIPTION_ID)
+    # No extraEnv: auth must succeed purely via the credentials file fallback.

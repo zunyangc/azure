@@ -1,0 +1,48 @@
+# `auto` -> Azure CLI fallback (line ~1904 of AzureRMAuth._get_credentials).
+# Distinct from pipeline-cli.yml: here auth_source is left at 'auto', so
+# AzureRMAuth must walk through params -> env -> credential file -> CLI and
+# arrive at the CLI branch on its own.
+#
+# Requirements:
+#   - No AZURE_* env vars set (other than the ones that don't drive auth).
+#   - No ~/.azure/credentials file present.
+#   - `az login` session present on disk for AzureCliCredential to use.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - auto + CLI fallback'
+    authSourceLabel: 'auto -> CLI'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    preAuthSteps:
+      - bash: |
+          set -eu
+          # Make sure no stale credentials file is around - we need to force
+          # AzureRMAuth past the credfile fallback and into the CLI branch.
+          rm -f "${HOME}/.azure/credentials"
+        displayName: 'Ensure no ~/.azure/credentials present'
+      - task: AzureCLI@2
+        displayName: 'az login via service connection (persisted)'
+        inputs:
+          azureSubscription: '$(SUBSCRIPTION_FULL_NAME)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          # useGlobalConfig=true persists the login in ~/.azure so subsequent
+          # steps (ansible-test) see it.
+          useGlobalConfig: true
+          inlineScript: |
+            az account show --query id -o tsv
+    # No extraEnv: AZURE_* must be unset and AUTH_SMOKE_AUTH_SOURCE must NOT be
+    # 'cli' for this to truly exercise the auto -> CLI fallback path.

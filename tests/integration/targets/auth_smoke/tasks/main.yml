@@ -1,0 +1,86 @@
+---
+# Minimal auth-surface integration test for AzureRMAuth.
+#
+# This target intentionally does NOT set any auth-related parameters on the
+# modules. The pipeline that runs it is responsible for configuring exactly
+# one authentication path (env vars, credential file, MSI runner identity,
+# az login, OIDC token / token file, auth_source, etc.) so that any failure
+# here directly indicates a regression in that auth path.
+#
+# Workload: create RG -> read RG via _info and assert -> delete RG.
+# The delete is in `always:` so the resource group is removed even when an
+# assertion fails partway through.
+
+- name: "Auth smoke ({{ auth_smoke_label | default('unspecified') }}): RG round-trip"
+  vars:
+    # auth_source / profile / SP creds are surfaced here from AUTH_SMOKE_* env
+    # vars set by the pipeline. They are namespaced under AUTH_SMOKE_* (NOT
+    # AZURE_*) so AzureRMAuth's automatic env pickup cannot satisfy auth on
+    # its own — only the explicit module_defaults below can. `omit` keeps the
+    # module defaults when the pipeline doesn't set the corresponding var,
+    # which is what every pipeline that doesn't drive auth through module
+    # params relies on.
+    _auth_source: "{{ lookup('env', 'AUTH_SMOKE_AUTH_SOURCE') | default(omit, true) }}"
+    _auth_profile: "{{ lookup('env', 'AUTH_SMOKE_PROFILE') | default(omit, true) }}"
+    _client_id: "{{ lookup('env', 'AUTH_SMOKE_CLIENT_ID') | default(omit, true) }}"
+    _secret: "{{ lookup('env', 'AUTH_SMOKE_SECRET') | default(omit, true) }}"
+    _tenant: "{{ lookup('env', 'AUTH_SMOKE_TENANT') | default(omit, true) }}"
+    _subscription_id: "{{ lookup('env', 'AUTH_SMOKE_SUBSCRIPTION_ID') | default(omit, true) }}"
+  module_defaults:
+    group/azure:
+      auth_source: "{{ _auth_source }}"
+      profile: "{{ _auth_profile }}"
+      client_id: "{{ _client_id }}"
+      secret: "{{ _secret }}"
+      tenant: "{{ _tenant }}"
+      subscription_id: "{{ _subscription_id }}"
+  block:
+    - name: Create resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ auth_smoke_rg_name }}"
+        location: "{{ auth_smoke_location }}"
+      register: rg_create
+
+    - name: Assert resource group was created
+      ansible.builtin.assert:
+        that:
+          - rg_create is changed
+          - rg_create.state.name == auth_smoke_rg_name
+          - rg_create.state.location == auth_smoke_location
+
+    - name: Read resource group via _info
+      azure.azcollection.azure_rm_resourcegroup_info:
+        name: "{{ auth_smoke_rg_name }}"
+      register: rg_info
+
+    - name: Assert _info returned the resource group
+      ansible.builtin.assert:
+        that:
+          - rg_info.resourcegroups | length == 1
+          - rg_info.resourcegroups[0].name == auth_smoke_rg_name
+          - rg_info.resourcegroups[0].location == auth_smoke_location
+
+    - name: Re-run create (idempotency check exercises another auth round-trip)
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ auth_smoke_rg_name }}"
+        location: "{{ auth_smoke_location }}"
+      register: rg_idem
+
+    - name: Assert create is idempotent
+      ansible.builtin.assert:
+        that:
+          - rg_idem is not changed
+  always:
+    - name: Delete resource group (cleanup)
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ auth_smoke_rg_name }}"
+        state: absent
+        force_delete_nonempty: true
+      ignore_errors: true
+      vars:
+        _auth_source: "{{ lookup('env', 'AUTH_SMOKE_AUTH_SOURCE') | default(omit, true) }}"
+        _auth_profile: "{{ lookup('env', 'AUTH_SMOKE_PROFILE') | default(omit, true) }}"
+        _client_id: "{{ lookup('env', 'AUTH_SMOKE_CLIENT_ID') | default(omit, true) }}"
+        _secret: "{{ lookup('env', 'AUTH_SMOKE_SECRET') | default(omit, true) }}"
+        _tenant: "{{ lookup('env', 'AUTH_SMOKE_TENANT') | default(omit, true) }}"
+        _subscription_id: "{{ lookup('env', 'AUTH_SMOKE_SUBSCRIPTION_ID') | default(omit, true) }}"

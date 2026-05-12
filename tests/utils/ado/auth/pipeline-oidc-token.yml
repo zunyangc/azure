@@ -1,0 +1,46 @@
+# OIDC / federated identity - direct token (in-memory).
+# Exercises the ClientAssertionCredential branch keyed by `oidc_token`
+# (env var AZURE_FEDERATED_TOKEN).
+#
+# The federated SC issues a short-lived token, which we capture via
+# AzureCLI@2's `addSpnToEnvironment: true` and pass through as env vars.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - OIDC token (in-memory)'
+    authSourceLabel: 'oidc-token (auto)'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    preAuthSteps:
+      - task: AzureCLI@2
+        displayName: 'Mint federated OIDC token'
+        inputs:
+          azureSubscription: '$(OIDC_SERVICE_CONNECTION)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          addSpnToEnvironment: true
+          inlineScript: |
+            set -eu
+            # idToken is provided by ADO when addSpnToEnvironment=true and
+            # the service connection is workload-identity-federation based.
+            : "${idToken:?idToken not exported by AzureCLI task; ensure SC is federated}"
+            echo "##vso[task.setvariable variable=AZURE_CLIENT_ID;issecret=false]${servicePrincipalId}"
+            echo "##vso[task.setvariable variable=AZURE_TENANT;issecret=false]${tenantId}"
+            echo "##vso[task.setvariable variable=AZURE_FEDERATED_TOKEN;issecret=true]${idToken}"
+    extraEnv:
+      AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
+      AZURE_TENANT: $(AZURE_TENANT)
+      AZURE_FEDERATED_TOKEN: $(AZURE_FEDERATED_TOKEN)
+      AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)

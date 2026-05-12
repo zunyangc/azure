@@ -1,0 +1,57 @@
+# `auto` + `profile` MODULE PARAMETER (no auth_source).
+# Exercises line ~1883 of AzureRMAuth._get_credentials: the auto branch
+# where arg_credentials['profile'] is non-None and _get_profile() is called.
+#
+# This is distinct from `auth_source=credential_file` + profile (which is
+# covered by pipeline-credential-file-profile.yml) - here auth_source is
+# left at its default ('auto') and only the `profile` module param is set.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - auto + profile param'
+    authSourceLabel: 'auto + profile=smoke'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    preAuthSteps:
+      - bash: |
+          set -eu
+          umask 077
+          mkdir -p "${HOME}/.azure"
+          set +x
+          cat > "${HOME}/.azure/credentials" <<EOF
+          [default]
+          # Intentionally bogus so the named profile is the only one that works.
+          subscription_id=00000000-0000-0000-0000-000000000000
+          client_id=00000000-0000-0000-0000-000000000000
+          secret=invalid
+          tenant=00000000-0000-0000-0000-000000000000
+
+          [smoke]
+          subscription_id=${AZURE_SUBSCRIPTION_ID_SECRET}
+          client_id=${AZURE_CLIENT_ID_SECRET}
+          secret=${AZURE_SECRET_SECRET}
+          tenant=${AZURE_TENANT_SECRET}
+          EOF
+          set -x
+          chmod 600 "${HOME}/.azure/credentials"
+        displayName: 'Write ~/.azure/credentials with named profile'
+        env:
+          AZURE_CLIENT_ID_SECRET: $(AZURE_CLIENT_ID)
+          AZURE_SECRET_SECRET: $(AZURE_SECRET)
+          AZURE_TENANT_SECRET: $(AZURE_TENANT)
+          AZURE_SUBSCRIPTION_ID_SECRET: $(AZURE_SUBSCRIPTION_ID)
+    extraEnv:
+      # NOTE: AUTH_SMOKE_AUTH_SOURCE intentionally unset -> module sees 'auto'.
+      AUTH_SMOKE_PROFILE: 'smoke'

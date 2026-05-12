@@ -1,0 +1,30 @@
+# Managed Identity (MSI). Exercises auth_source=msi explicitly.
+# Requires a SELF-HOSTED ADO agent with a managed identity attached
+# (system-assigned or user-assigned). Set MSI_CLIENT_ID for user-assigned.
+# AZURE_SUBSCRIPTION_ID must be provided (MSI may have access to several).
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - MSI'
+    authSourceLabel: 'msi'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    pool:
+      name: $(MSI_POOL_NAME)
+    extraEnv:
+      AUTH_SMOKE_AUTH_SOURCE: 'msi'
+      # AZURE_CLIENT_ID is read by _get_msi_credentials when set (user-assigned MI).
+      AZURE_CLIENT_ID: $(MSI_CLIENT_ID)
+      AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)

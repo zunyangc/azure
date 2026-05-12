@@ -1,0 +1,40 @@
+# Azure CLI authentication. Exercises auth_source=cli, which uses
+# AzureCliCredential() and shells out to `az account show` / `az cloud show`.
+# Pre-step performs `az login` via a federated workload-identity SC so that
+# `az` itself is authenticated when ansible runs.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: PYTHON_VER
+    type: string
+    default: "3.13"
+  - name: ANSIBLE_VER
+    type: string
+    default: "2.18"
+
+extends:
+  template: template-auth-pipeline.yml
+  parameters:
+    pipelineDisplayName: 'Auth smoke - Azure CLI'
+    authSourceLabel: 'cli'
+    pythonVer: ${{ parameters.PYTHON_VER }}
+    ansibleVer: ${{ parameters.ANSIBLE_VER }}
+    preAuthSteps:
+      - task: AzureCLI@2
+        displayName: 'az login via service connection'
+        inputs:
+          azureSubscription: '$(SUBSCRIPTION_FULL_NAME)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          # useGlobalConfig=true forces the login to write to ~/.azure (instead
+          # of a task-scoped AZURE_CONFIG_DIR) so the session survives into the
+          # later ansible-test step. Without this, AzureCLI@2 hides its login
+          # from subsequent steps.
+          useGlobalConfig: true
+          inlineScript: |
+            az account show --query id -o tsv
+    extraEnv:
+      AUTH_SMOKE_AUTH_SOURCE: 'cli'
+      AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)
